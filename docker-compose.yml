@@ -1,0 +1,96 @@
+name: azure-ocr
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  PORT: 3000
+  HOST: 0.0.0.0
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  TEMP_DIR: /app/tmp
+  AZURE_TIER: ${AZURE_TIER:-F0}
+  AZURE_ENDPOINT: ${AZURE_ENDPOINT:-}
+  AZURE_KEY: ${AZURE_KEY:-}
+  AZURE_API_VERSION: ${AZURE_API_VERSION:-2024-11-30}
+  AZURE_MODEL_ID: ${AZURE_MODEL_ID:-prebuilt-layout}
+  AZURE_REQUEST_TIMEOUT_MS: ${AZURE_REQUEST_TIMEOUT_MS:-30000}
+  AZURE_OPERATION_TIMEOUT_MS: ${AZURE_OPERATION_TIMEOUT_MS:-120000}
+  AZURE_POLL_INTERVAL_MS: ${AZURE_POLL_INTERVAL_MS:-2000}
+  AZURE_MAX_RETRIES: ${AZURE_MAX_RETRIES:-3}
+  AZURE_RETRY_BASE_DELAY_MS: ${AZURE_RETRY_BASE_DELAY_MS:-1000}
+  AZURE_SUBMIT_REQUESTS_PER_SECOND: ${AZURE_SUBMIT_REQUESTS_PER_SECOND:-1}
+  AZURE_POLL_REQUESTS_PER_SECOND: ${AZURE_POLL_REQUESTS_PER_SECOND:-1}
+  AZURE_MAX_INPUT_SIZE_MB: ${AZURE_MAX_INPUT_SIZE_MB:-4}
+  FILE_WORKER_CONCURRENCY: ${FILE_WORKER_CONCURRENCY:-3}
+  FILE_JOB_MAX_ATTEMPTS: ${FILE_JOB_MAX_ATTEMPTS:-3}
+  FILE_JOB_BACKOFF_MS: ${FILE_JOB_BACKOFF_MS:-1000}
+  JOB_TTL_HOURS: ${JOB_TTL_HOURS:-24}
+  CLEANUP_INTERVAL_MINUTES: ${CLEANUP_INTERVAL_MINUTES:-60}
+
+x-app-image: &app-image
+  image: azure-ocr-service:local
+  build:
+    context: .
+
+services:
+  api:
+    <<: *app-image
+    command: ["node", "dist/server.js"]
+    environment:
+      <<: *app-environment
+      SERVICE_API_KEY: ${SERVICE_API_KEY:?Set SERVICE_API_KEY}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+      MAX_BATCH_SIZE_MB: ${MAX_BATCH_SIZE_MB:-250}
+      IDEMPOTENCY_TTL_HOURS: ${IDEMPOTENCY_TTL_HOURS:-24}
+      API_UPLOAD_REQUESTS_PER_MINUTE: ${API_UPLOAD_REQUESTS_PER_MINUTE:-30}
+      API_STATUS_REQUESTS_PER_MINUTE: ${API_STATUS_REQUESTS_PER_MINUTE:-300}
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - ocr_tmp:/app/tmp
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    <<: *app-image
+    command: ["node", "dist/worker.js"]
+    environment: *app-environment
+    volumes:
+      - ocr_tmp:/app/tmp
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 3m
+
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  ocr_tmp:
+  redis_data:

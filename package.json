@@ -1,0 +1,39 @@
+{
+  "name": "azure-ocr-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint src tests",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"*.json\" \"*.mjs\" \"README.md\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"*.json\" \"*.mjs\" \"README.md\"",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "smoke:docker": "node scripts/docker-smoke.mjs"
+  },
+  "dependencies": {
+    "@fastify/multipart": "10.1.0",
+    "bullmq": "^5.80.10",
+    "fastify": "5.10.0",
+    "ioredis": "5.11.1",
+    "pdf-lib": "^1.17.1",
+    "pino": "10.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.7.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10"
+  }
+}
