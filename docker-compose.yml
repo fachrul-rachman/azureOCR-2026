@@ -45,7 +45,7 @@ services:
       API_UPLOAD_REQUESTS_PER_MINUTE: ${API_UPLOAD_REQUESTS_PER_MINUTE:-30}
       API_STATUS_REQUESTS_PER_MINUTE: ${API_STATUS_REQUESTS_PER_MINUTE:-300}
     ports:
-      - "${PORT:-3000}:3000"
+      - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
       - ocr_tmp:/app/tmp
     depends_on:
