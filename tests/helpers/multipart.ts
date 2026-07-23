@@ -2,6 +2,7 @@ interface MultipartFile {
   name: string;
   content: string | Buffer;
   contentType?: string;
+  fieldName?: string;
 }
 
 interface MultipartRequest {
@@ -27,7 +28,7 @@ export function createMultipartRequest(
   for (const file of files) {
     parts.push(
       Buffer.from(
-        `--${BOUNDARY}\r\nContent-Disposition: form-data; name="files"; filename="${file.name}"\r\nContent-Type: ${file.contentType ?? "application/pdf"}\r\n\r\n`,
+        `--${BOUNDARY}\r\nContent-Disposition: form-data; name="${file.fieldName ?? "files"}"; filename="${file.name}"\r\nContent-Type: ${file.contentType ?? "application/pdf"}\r\n\r\n`,
       ),
       Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content),
       Buffer.from("\r\n"),

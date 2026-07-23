@@ -12,6 +12,7 @@ describe("API settings", () => {
       serviceApiKey: "secret",
       maxFileSizeBytes: 50 * 1024 * 1024,
       maxBatchSizeBytes: 250 * 1024 * 1024,
+      maxFilesPerBatch: 15,
       jobTtlSeconds: 24 * 60 * 60,
       idempotencyTtlSeconds: 24 * 60 * 60,
       maxAzureInputSizeBytes: 4 * 1024 * 1024,
@@ -23,6 +24,7 @@ describe("API settings", () => {
   it.each([
     ["MAX_FILE_SIZE_MB", "0"],
     ["MAX_BATCH_SIZE_MB", "invalid"],
+    ["MAX_FILES_PER_BATCH", "0"],
     ["JOB_TTL_HOURS", "-1"],
     ["IDEMPOTENCY_TTL_HOURS", "1.5"],
     ["AZURE_MAX_INPUT_SIZE_MB", "0"],
@@ -32,5 +34,14 @@ describe("API settings", () => {
     expect(() =>
       loadApiSettings({ SERVICE_API_KEY: "secret", [name]: value }),
     ).toThrow(`${name} must be a positive integer`);
+  });
+
+  it("loads a custom maximum file count", () => {
+    expect(
+      loadApiSettings({
+        SERVICE_API_KEY: "secret",
+        MAX_FILES_PER_BATCH: "10",
+      }).maxFilesPerBatch,
+    ).toBe(10);
   });
 });

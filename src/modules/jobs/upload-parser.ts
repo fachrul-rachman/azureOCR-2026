@@ -10,7 +10,15 @@ import type { CreateBatchCommand, UploadedFile } from "./job-service.js";
 export interface UploadLimits {
   maxFileSizeBytes: number;
   maxBatchSizeBytes: number;
+  maxFilesPerBatch: number;
 }
+
+interface PendingFile {
+  file: UploadedFile;
+  number?: bigint;
+}
+
+const NUMBERED_FILE_FIELD = /^file_(\d+)$/;
 
 function readTextField(value: unknown, fieldName: string): string {
   if (typeof value !== "string") {
@@ -38,10 +46,12 @@ export async function parseJobUpload(
     ]);
   }
 
-  const files: UploadedFile[] = [];
+  const repeatedFiles: PendingFile[] = [];
+  const numberedFiles: PendingFile[] = [];
   let metadataText: string | undefined;
   let idempotencyKey: string | undefined;
   let totalFileSize = 0;
+  let fileCount = 0;
 
   const parts = request.parts({
     limits: {
@@ -55,10 +65,22 @@ export async function parseJobUpload(
   try {
     for await (const part of parts) {
       if (part.type === "file") {
-        if (part.fieldname !== "files") {
+        const numberedMatch = NUMBERED_FILE_FIELD.exec(part.fieldname);
+        if (part.fieldname !== "files" && numberedMatch === null) {
           part.file.resume();
           throw new ValidationError([
             { field: part.fieldname, message: "Field file tidak dikenal." },
+          ]);
+        }
+
+        fileCount += 1;
+        if (fileCount > limits.maxFilesPerBatch) {
+          part.file.resume();
+          throw new ValidationError([
+            {
+              field: "files",
+              message: `Maksimal ${String(limits.maxFilesPerBatch)} file per batch.`,
+            },
           ]);
         }
 
@@ -88,14 +110,19 @@ export async function parseJobUpload(
           throw error;
         }
 
-        files.push({
+        const file: UploadedFile = {
           uploadName: part.filename,
           declaredMimeType: part.mimetype,
           mimeType: stored.mimeType,
           temporaryPath: stored.path,
           size: stored.size,
           sha256: stored.sha256,
-        });
+        };
+        if (numberedMatch === null) {
+          repeatedFiles.push({ file });
+        } else {
+          numberedFiles.push({ file, number: BigInt(numberedMatch[1] ?? "0") });
+        }
         continue;
       }
 
@@ -123,7 +150,11 @@ export async function parseJobUpload(
       }
     }
   } catch (error) {
-    await storage.removeMany(files.map((file) => file.temporaryPath));
+    await storage.removeMany(
+      [...repeatedFiles, ...numberedFiles].map(
+        ({ file }) => file.temporaryPath,
+      ),
+    );
     throw error;
   }
 
@@ -147,5 +178,14 @@ export async function parseJobUpload(
     ]);
   }
 
-  return { files, metadata, idempotencyKey };
+  numberedFiles.sort((left, right) => {
+    if (left.number === right.number) return 0;
+    return (left.number ?? 0n) < (right.number ?? 0n) ? -1 : 1;
+  });
+
+  return {
+    files: [...repeatedFiles, ...numberedFiles].map(({ file }) => file),
+    metadata,
+    idempotencyKey,
+  };
 }

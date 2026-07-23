@@ -43,6 +43,7 @@ const app = buildApp({
     serviceApiKey: apiSettings.serviceApiKey,
     maxFileSizeBytes: apiSettings.maxFileSizeBytes,
     maxBatchSizeBytes: apiSettings.maxBatchSizeBytes,
+    maxFilesPerBatch: apiSettings.maxFilesPerBatch,
     uploadRequestsPerMinute: apiSettings.uploadRequestsPerMinute,
     statusRequestsPerMinute: apiSettings.statusRequestsPerMinute,
     storage,

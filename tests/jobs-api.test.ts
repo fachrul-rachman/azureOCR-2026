@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,7 @@ const API_KEY = "phase-3-test-api-key";
 const DEFAULT_LIMITS = {
   maxFileSizeBytes: 1024,
   maxBatchSizeBytes: 32 * 1024,
+  maxFilesPerBatch: 15,
 };
 
 interface TestContext {
@@ -31,6 +32,10 @@ const temporaryDirectories: string[] = [];
 
 function validPdf(content: string): Buffer {
   return Buffer.from(`%PDF-1.7\n${content}`);
+}
+
+function sha256(content: Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function createTestContext(
@@ -178,6 +183,106 @@ describe("job API", () => {
     });
   });
 
+  it("accepts repeated files fields in request order", async () => {
+    const { app, repository } = createTestContext();
+    apps.push(app);
+    const first = validPdf("first");
+    const second = validPdf("second");
+    const request = createMultipartRequest(
+      [
+        { name: "first.pdf", content: first },
+        { name: "second.pdf", content: second },
+      ],
+      metadataFor(["first.pdf", "second.pdf"]),
+      "repeated-files-key",
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/ocr/jobs",
+      headers: { ...request.headers, "x-api-key": API_KEY },
+      payload: request.payload,
+    });
+    const batch = await repository.get(
+      response.json<{ batch_id: string }>().batch_id,
+    );
+
+    expect(response.statusCode).toBe(202);
+    expect(batch?.files.map((file) => file.sha256)).toEqual([
+      sha256(first),
+      sha256(second),
+    ]);
+  });
+
+  it("accepts file_1 through file_15 in numeric order", async () => {
+    const { app, repository } = createTestContext();
+    apps.push(app);
+    const numberedFiles = Array.from({ length: 15 }, (_, index) => {
+      const number = index + 1;
+      return {
+        number,
+        name: `page-${String(number)}.pdf`,
+        content: validPdf(`page-${String(number)}`),
+      };
+    });
+    const request = createMultipartRequest(
+      numberedFiles.toReversed().map(({ number, name, content }) => ({
+        name,
+        content,
+        fieldName: `file_${String(number)}`,
+      })),
+      metadataFor(numberedFiles.map(({ name }) => name)),
+      "numbered-files-key",
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/ocr/jobs",
+      headers: { ...request.headers, "x-api-key": API_KEY },
+      payload: request.payload,
+    });
+    const batch = await repository.get(
+      response.json<{ batch_id: string }>().batch_id,
+    );
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ file_count: 15 });
+    expect(batch?.files.map((file) => file.sha256)).toEqual(
+      numberedFiles.map(({ content }) => sha256(content)),
+    );
+  });
+
+  it("orders file_2 before file_10 by number", async () => {
+    const { app, repository } = createTestContext();
+    apps.push(app);
+    const second = validPdf("second");
+    const tenth = validPdf("tenth");
+    const request = createMultipartRequest(
+      [
+        { name: "ten.pdf", content: tenth, fieldName: "file_10" },
+        { name: "two.pdf", content: second, fieldName: "file_2" },
+      ],
+      metadataFor(["two.pdf", "ten.pdf"]),
+      "numeric-order-key",
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/ocr/jobs",
+      headers: { ...request.headers, "x-api-key": API_KEY },
+      payload: request.payload,
+    });
+    const batch = await repository.get(
+      response.json<{ batch_id: string }>().batch_id,
+    );
+
+    expect(response.statusCode).toBe(202);
+    expect(batch?.files.map((file) => file.sha256)).toEqual([
+      sha256(second),
+      sha256(tenth),
+    ]);
+  });
+
   it("returns the existing batch for an identical retry", async () => {
     const { app, storage } = createTestContext();
     apps.push(app);
@@ -315,8 +420,8 @@ describe("job API", () => {
     await expect(storage.list()).resolves.toEqual([]);
   });
 
-  it("accepts more than 15 files", async () => {
-    const { app } = createTestContext();
+  it("rejects more than 15 files and removes temporary data", async () => {
+    const { app, storage } = createTestContext();
     apps.push(app);
     const names = Array.from(
       { length: 16 },
@@ -335,8 +440,11 @@ describe("job API", () => {
       payload: request.payload,
     });
 
-    expect(response.statusCode).toBe(202);
-    expect(response.json()).toMatchObject({ file_count: 16 });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "VALIDATION_ERROR" },
+    });
+    await expect(storage.list()).resolves.toEqual([]);
   });
 
   it("rejects a batch without files", async () => {
@@ -361,9 +469,44 @@ describe("job API", () => {
     const { app, storage } = createTestContext();
     apps.push(app);
     const request = createMultipartRequest(
-      [{ name: "manual.pdf", content: validPdf("document") }],
+      [
+        {
+          name: "manual.pdf",
+          content: validPdf("document"),
+          fieldName: "file_1",
+        },
+      ],
       [],
       "metadata-key",
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/ocr/jobs",
+      headers: { ...request.headers, "x-api-key": API_KEY },
+      payload: request.payload,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "VALIDATION_ERROR" },
+    });
+    await expect(storage.list()).resolves.toEqual([]);
+  });
+
+  it("rejects an unknown multipart file field", async () => {
+    const { app, storage } = createTestContext();
+    apps.push(app);
+    const request = createMultipartRequest(
+      [
+        {
+          name: "manual.pdf",
+          content: validPdf("document"),
+          fieldName: "document",
+        },
+      ],
+      metadataFor(["manual.pdf"]),
+      "unknown-field-key",
     );
 
     const response = await app.inject({
@@ -406,6 +549,7 @@ describe("job API", () => {
     const { app } = createTestContext({
       maxFileSizeBytes: 3,
       maxBatchSizeBytes: 100,
+      maxFilesPerBatch: 15,
     });
     apps.push(app);
     const request = createMultipartRequest(
@@ -431,6 +575,7 @@ describe("job API", () => {
     const { app } = createTestContext({
       maxFileSizeBytes: 10,
       maxBatchSizeBytes: 5,
+      maxFilesPerBatch: 15,
     });
     apps.push(app);
     const request = createMultipartRequest(

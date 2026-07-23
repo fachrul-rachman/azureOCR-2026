@@ -2,6 +2,7 @@ export interface ApiSettings {
   serviceApiKey: string;
   maxFileSizeBytes: number;
   maxBatchSizeBytes: number;
+  maxFilesPerBatch: number;
   jobTtlSeconds: number;
   idempotencyTtlSeconds: number;
   maxAzureInputSizeBytes: number;
@@ -64,6 +65,11 @@ export function loadApiSettings(environment: NodeJS.ProcessEnv): ApiSettings {
     serviceApiKey,
     maxFileSizeBytes: maxFileSizeMb * 1024 * 1024,
     maxBatchSizeBytes: maxBatchSizeMb * 1024 * 1024,
+    maxFilesPerBatch: positiveInteger(
+      environment.MAX_FILES_PER_BATCH,
+      "MAX_FILES_PER_BATCH",
+      15,
+    ),
     jobTtlSeconds: jobTtlHours * 60 * 60,
     idempotencyTtlSeconds: idempotencyTtlHours * 60 * 60,
     maxAzureInputSizeBytes: maxAzureInputSizeMb * 1024 * 1024,
